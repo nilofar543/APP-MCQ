@@ -1,0 +1,39 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Online Exam</title><link rel="stylesheet" href="style.css"></head><body><div id="timerbar"></div><div class="wrap">
+<div id="msg" class="card" style="display:none"></div>
+
+<div id="start" class="card" style="display:none"><h1 id="etitle"></h1><p id="edesc" class="muted"></p><p id="einfo" class="muted"></p>
+ <input id="name" placeholder="Full name *"><input id="email" type="email" placeholder="Email *"><input id="roll" placeholder="Roll number / ID (optional)">
+ <button onclick="begin()">Start exam</button> <span id="serr" class="err"></span>
+ <hr><p class="muted">Already submitted? Check your score:</p>
+ <div class="row"><input id="cemail" type="email" placeholder="Your email" style="flex:1"><button class="sec" onclick="check()">Check score</button></div></div>
+
+<div id="exam" style="display:none"><div id="qbox"></div><button onclick="submitExam()">Submit exam</button> <span id="xerr" class="err"></span></div>
+<div id="result" class="card" style="display:none"></div></div>
+<script>
+const id=new URLSearchParams(location.search).get('id'),$=i=>document.getElementById(i);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+let E,order=[],answers=[],t0,timer,done=false;
+function fail(t){$('msg').style.display='block';$('msg').innerHTML=`<h2>${esc(t)}</h2>`}
+(async()=>{try{const r=await fetch('/api/exams/'+id),j=await r.json();if(!r.ok)return fail(j.error);E=j;
+ $('etitle').textContent=E.title;$('edesc').textContent=E.description;
+ $('einfo').textContent=`${E.questions.length} questions`+(E.duration?` · ${E.duration} minutes`:' · No time limit');$('start').style.display='block'}catch{fail('Could not load exam')}})();
+function begin(){const n=$('name').value.trim(),e=$('email').value.trim();if(!n||!e)return $('serr').textContent='Name and email are required.';
+ order=E.questions.map((_,i)=>i).sort(()=>Math.random()-.5);answers=E.questions.map(()=>-1);t0=Date.now();
+ $('qbox').innerHTML=order.map((qi,k)=>{const q=E.questions[qi];return `<div class="card"><b>Q${k+1}. ${esc(q.text)}</b>`+q.options.map((o,oi)=>
+  `<label class="opt"><input type="radio" name="q${qi}" onchange="answers[${qi}]=${oi}"> ${esc(o)}</label>`).join('')+'</div>'}).join('');
+ $('start').style.display='none';$('exam').style.display='block';
+ if(E.duration){const end=t0+E.duration*60000;timer=setInterval(()=>{const left=Math.max(0,Math.round((end-Date.now())/1000));
+  $('timerbar').innerHTML=`<div id="timer">Time left: ${Math.floor(left/60)}:${String(left%60).padStart(2,'0')}</div>`;if(!left)submitExam(true)},500)}}
+function showResult(j){clearInterval(timer);$('timerbar').innerHTML='';$('start').style.display='none';$('exam').style.display='none';$('result').style.display='block';
+ let h=`<h2>Your Result</h2><div class="big">${j.score} / ${j.total}</div><p>${(j.score/j.total*100).toFixed(0)}%</p>`;
+ if(j.review)h+='<h3>Review</h3>'+j.review.map((q,i)=>`<div class="card"><b>Q${i+1}. ${esc(q.text)}</b>`+q.options.map((o,oi)=>
+  `<div class="opt ${oi===q.correct?'ok':oi===q.chosen?'bad':''}">${esc(o)} ${oi===q.correct?'✔':oi===q.chosen?'✘ (your answer)':''}</div>`).join('')+'</div>').join('');
+ else h+='<p class="muted">Thank you! Your answers have been recorded.</p>';$('result').innerHTML=h}
+async function submitExam(auto){if(done)return;if(!auto&&answers.includes(-1)&&!confirm('Some questions are unanswered. Submit anyway?'))return;done=true;
+ const r=await fetch('/api/exams/'+id+'/submit',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({name:$('name').value,email:$('email').value,rollNo:$('roll').value,answers,timeTaken:Math.round((Date.now()-t0)/1000)})});
+ const j=await r.json();if(!r.ok){done=false;$('xerr').textContent=j.error;return}showResult(j)}
+async function check(){const r=await fetch(`/api/exams/${id}/result?email=`+encodeURIComponent($('cemail').value)),j=await r.json();
+ if(!r.ok)return $('serr').textContent=j.error;showResult(j)}
+window.onbeforeunload=e=>{if($('exam').style.display==='block'&&!done){e.preventDefault();return ''}};
+</script></body></html>

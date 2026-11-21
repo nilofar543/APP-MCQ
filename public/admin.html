@@ -1,0 +1,52 @@
+<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Exam Admin</title><link rel="stylesheet" href="style.css"></head><body><div class="wrap">
+<div id="login" class="card"><h2>Admin Login</h2><input id="pw" type="password" placeholder="Admin password">
+<button onclick="login()">Login</button> <span id="lerr" class="err"></span></div>
+
+<div id="app" style="display:none">
+ <div class="row" style="justify-content:space-between"><h1>MCQ Exam Admin</h1><button class="sec" onclick="logout()">Logout</button></div>
+ <div class="card"><h2>Create new exam</h2>
+  <input id="title" placeholder="Exam title"><textarea id="desc" rows="2" placeholder="Instructions / description (optional)"></textarea>
+  <div class="row"><div style="flex:1"><label class="muted">Time limit (minutes, 0 = no limit)</label><input id="dur" type="number" min="0" value="0"></div>
+  <label class="row"><input id="showAns" type="checkbox" style="width:auto"> Show correct answers to students after submit</label></div>
+  <h3>Questions</h3><div id="qs"></div>
+  <div class="row"><button class="sec" onclick="addQ()">+ Add question</button><button onclick="createExam()">Create exam &amp; get link</button></div>
+  <p id="cmsg"></p></div>
+ <div class="card"><h2>Your exams</h2><div id="list"></div></div>
+ <div class="card" id="results" style="display:none"></div>
+</div></div>
+<script>
+let PW=sessionStorage.getItem('pw')||'',qn=0;const $=id=>document.getElementById(id);
+const esc=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+async function api(url,opt={}){const r=await fetch(url,{...opt,headers:{'Content-Type':'application/json','x-admin-password':PW}});
+ if(r.status===401){logout();throw new Error('Wrong password')}return r}
+async function login(){PW=$('pw').value;try{const r=await api('/api/admin/exams');if(!r.ok)throw 0;sessionStorage.setItem('pw',PW);show()}catch{$('lerr').textContent='Wrong password'}}
+function logout(){sessionStorage.removeItem('pw');PW='';$('app').style.display='none';$('login').style.display='block'}
+function show(){$('login').style.display='none';$('app').style.display='block';if(!qn)addQ();load()}
+function addQ(){qn++;const n=qn,d=document.createElement('div');d.className='card';d.style.background='#fafbff';
+ d.innerHTML=`<textarea rows="2" placeholder="Question text" class="qt"></textarea>`+[0,1,2,3].map(i=>
+ `<div class="row"><input type="radio" name="c${n}" value="${i}" ${i==0?'checked':''} style="width:auto" title="Correct answer"><input class="qo" placeholder="Option ${i+1}" style="flex:1"></div>`).join('')+
+ `<div class="muted">Select the radio button next to the correct option.</div><button class="sec danger" onclick="this.parentElement.remove()">Remove</button>`;
+ $('qs').appendChild(d)}
+async function createExam(){const questions=[...$('qs').children].map(d=>({text:d.querySelector('.qt').value.trim(),
+ options:[...d.querySelectorAll('.qo')].map(o=>o.value.trim()),correct:+d.querySelector('input[type=radio]:checked').value}));
+ const r=await api('/api/admin/exams',{method:'POST',body:JSON.stringify({title:$('title').value,description:$('desc').value,duration:$('dur').value,showAnswers:$('showAns').checked,questions})});
+ const j=await r.json();if(!r.ok){$('cmsg').innerHTML=`<span class="err">${esc(j.error)}</span>`;return}
+ const link=location.origin+'/exam.html?id='+j.id;$('cmsg').innerHTML=`Exam created! Student link:<br><b>${esc(link)}</b> <button class="sec" onclick="navigator.clipboard.writeText('${link}')">Copy</button>`;
+ $('qs').innerHTML='';qn=0;addQ();$('title').value='';$('desc').value='';load()}
+async function load(){const r=await api('/api/admin/exams');const ex=await r.json();
+ $('list').innerHTML=ex.length?`<table><tr><th>Title</th><th>Qs</th><th>Submissions</th><th>Status</th><th></th></tr>`+ex.map(e=>`<tr><td>${esc(e.title)}</td><td>${e.questionCount}</td><td>${e.submissions}</td>
+ <td>${e.active?'Open':'Closed'}</td><td class="row"><button class="sec" onclick="copy('${e._id}')">Copy link</button><button class="sec" onclick="results('${e._id}')">Results</button>
+ <button class="sec" onclick="csv('${e._id}')">CSV</button><button class="sec" onclick="toggle('${e._id}')">${e.active?'Close':'Open'}</button><button class="danger" onclick="del('${e._id}')">Delete</button></td></tr>`).join('')+'</table>':'<p class="muted">No exams yet.</p>'}
+function copy(id){navigator.clipboard.writeText(location.origin+'/exam.html?id='+id);alert('Link copied')}
+async function toggle(id){await api('/api/admin/exams/'+id+'/toggle',{method:'PATCH'});load()}
+async function del(id){if(confirm('Delete this exam and all its submissions?')){await api('/api/admin/exams/'+id,{method:'DELETE'});$('results').style.display='none';load()}}
+async function results(id){const j=await(await api('/api/admin/exams/'+id+'/submissions')).json(),s=j.submissions;
+ const avg=s.length?(s.reduce((a,x)=>a+x.score,0)/s.length).toFixed(2):0,hi=s.length?Math.max(...s.map(x=>x.score)):0;
+ $('results').style.display='block';$('results').innerHTML=`<h2>Results: ${esc(j.exam.title)}</h2><p class="muted">${s.length} submissions · Average ${avg}/${j.exam.total} · Highest ${hi}/${j.exam.total}</p>`+
+ (s.length?`<table><tr><th>Name</th><th>Email</th><th>Roll No</th><th>Score</th><th>%</th><th>Time</th><th>Submitted</th></tr>`+s.map(x=>`<tr><td>${esc(x.name)}</td><td>${esc(x.email)}</td><td>${esc(x.rollNo)}</td>
+ <td>${x.score}/${x.total}</td><td>${(x.score/x.total*100).toFixed(0)}%</td><td>${Math.floor(x.timeTaken/60)}m ${x.timeTaken%60}s</td><td>${new Date(x.createdAt).toLocaleString()}</td></tr>`).join('')+'</table>':'');
+ $('results').scrollIntoView({behavior:'smooth'})}
+async function csv(id){const r=await api('/api/admin/exams/'+id+'/export');const a=document.createElement('a');a.href=URL.createObjectURL(await r.blob());a.download='results.csv';a.click()}
+if(PW)api('/api/admin/exams').then(r=>r.ok&&show()).catch(()=>{});
+</script></body></html>
